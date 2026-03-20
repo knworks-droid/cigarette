@@ -257,6 +257,51 @@ body {
 
 .empty-day{padding:32px;text-align:center;color:#ccc;font-size:13px;}
 
+/* メモ */
+.memo-row{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 18px 12px;border-bottom:1px solid #f0f0f0;
+}
+.memo-text{flex:1;font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.memo-text.empty{color:#ccc;}
+.memo-edit-btn{
+  flex-shrink:0;background:none;border:1px solid #ddd;border-radius:8px;
+  padding:4px 10px;font-size:11px;color:#888;cursor:pointer;
+  font-family:'Zen Kaku Gothic New',sans-serif;
+}
+.memo-edit-btn:active{background:#f0f0f0;}
+
+/* メモモーダル */
+.memo-modal-overlay{
+  position:absolute;inset:0;background:rgba(0,0,0,0.4);
+  display:flex;align-items:flex-end;
+  opacity:0;pointer-events:none;transition:opacity 0.25s;z-index:200;
+}
+.memo-modal-overlay.open{opacity:1;pointer-events:all;}
+.memo-modal-sheet{
+  background:white;border-radius:22px 22px 0 0;width:100%;
+  padding:20px 22px max(env(safe-area-inset-bottom,0px) + 20px, 32px);
+  transform:translateY(100%);
+  transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+.memo-modal-overlay.open .memo-modal-sheet{transform:translateY(0);}
+.memo-modal-date{font-size:12px;color:#aaa;margin-bottom:4px;}
+.memo-modal-title{font-size:15px;font-weight:700;color:#2d3a2d;margin-bottom:14px;}
+.memo-textarea{
+  width:100%;height:90px;border:1.5px solid #e8e8e8;border-radius:12px;
+  padding:12px 14px;font-size:14px;font-family:'Zen Kaku Gothic New',sans-serif;
+  resize:none;outline:none;color:#333;line-height:1.6;
+}
+.memo-textarea:focus{border-color:#3a5240;}
+.memo-modal-btns{display:flex;gap:10px;margin-top:12px;}
+.memo-btn-cancel{flex:1;background:#f2f2f2;color:#666;border:none;border-radius:12px;padding:12px;font-size:14px;cursor:pointer;font-family:'Zen Kaku Gothic New',sans-serif;}
+.memo-btn-save{flex:2;background:#3a5240;color:white;border:none;border-radius:12px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Zen Kaku Gothic New',sans-serif;}
+.memo-btn-cancel:active{background:#e8e8e8;}
+.memo-btn-save:active{background:#2d4030;}
+
+/* カレンダーのメモドット */
+.cal-cell .memo-dot{width:4px;height:4px;border-radius:50%;background:#3a5240;margin-top:1px;}
+
 /* ==================== MODAL ==================== */
 .modal-overlay{
   position:absolute;inset:0;background:rgba(0,0,0,0.4);
@@ -420,12 +465,31 @@ body {
           <div class="day-panel-date" id="dayPanelDate"></div>
           <button class="add-btn" id="addBtn">＋ 追加</button>
         </div>
+        <!-- メモ行 -->
+        <div class="memo-row" id="memoRow">
+          <span class="memo-text empty" id="memoText">📝 メモを追加</span>
+          <button class="memo-edit-btn" id="memoEditBtn">編集</button>
+        </div>
         <div class="time-list-header">
           <div class="tlh-num"></div>
           <div class="tlh-time">喫煙時刻</div>
           <div class="tlh-iv">インターバル</div>
         </div>
         <div class="time-list" id="timeList"></div>
+      </div>
+
+      <!-- メモモーダル -->
+      <div class="memo-modal-overlay" id="memoModal">
+        <div class="memo-modal-sheet">
+          <div class="modal-handle"></div>
+          <div class="memo-modal-date" id="memoModalDate"></div>
+          <div class="memo-modal-title">メモ</div>
+          <textarea class="memo-textarea" id="memoInput" placeholder="購入日・気づきなど自由に"></textarea>
+          <div class="memo-modal-btns">
+            <button class="memo-btn-cancel" id="memoCancelBtn">キャンセル</button>
+            <button class="memo-btn-save" id="memoSaveBtn">保存</button>
+          </div>
+        </div>
       </div>
 
       <!-- 時刻モーダル -->
@@ -475,6 +539,8 @@ const LS = {
 let settings = LS.get('sl_settings') || { target: 3, price: 27 };
 // smokeData: { "YYYY-M-D": ["HH:MM", ...] }
 let smokeData = LS.get('sl_data') || {};
+// memoData: { "YYYY-M-D": "メモ文字列" }
+let memoData = LS.get('sl_memos') || {};
 
 let calYear, calMonth, selectedDay;
 const today = new Date();
@@ -485,6 +551,7 @@ selectedDay = today.getDate();
 const DW = ['日','月','火','水','木','金','土'];
 
 function save() { LS.set('sl_data', smokeData); }
+function saveMemos() { LS.set('sl_memos', memoData); }
 function saveSettings() { LS.set('sl_settings', settings); }
 
 // ==================== SWIPE NAVIGATION ====================
@@ -651,7 +718,8 @@ function buildCalendar() {
     else if (cnt > 0) cls += cnt <= settings.target ? ' good' : ' over';
     if (d === selectedDay) cls += ' selected';
     c.className = cls;
-    c.innerHTML = `<div class="cd">${d}</div><div class="cc">${cnt > 0 ? cnt+'本' : ''}</div>`;
+    const hasMemo = !!memoData[`${calYear}-${calMonth}-${d}`];
+    c.innerHTML = `<div class="cd">${d}</div><div class="cc">${cnt > 0 ? cnt+'本' : ''}</div>${hasMemo ? '<div class="memo-dot"></div>' : ''}`;
     c.addEventListener('click', () => selectDay(d));
     grid.appendChild(c);
   }
@@ -661,6 +729,7 @@ function selectDay(d) {
   selectedDay = d;
   buildCalendar();
   renderTimeList();
+  renderMemo();
   const w = new Date(calYear, calMonth-1, d).getDay();
   document.getElementById('dayPanelDate').textContent = `${calYear}年${calMonth}月${d}日（${DW[w]}）`;
 }
@@ -816,6 +885,49 @@ document.getElementById('settingsSave').addEventListener('click', () => {
   saveSettings();
   document.getElementById('settingsModal').classList.remove('open');
   refreshHome(); buildCalendar(); renderTimeList();
+});
+
+// ==================== MEMO ====================
+function renderMemo() {
+  const key = `${calYear}-${calMonth}-${selectedDay}`;
+  const memo = memoData[key] || '';
+  const textEl = document.getElementById('memoText');
+  if (memo) {
+    textEl.textContent = '📝 ' + memo;
+    textEl.classList.remove('empty');
+  } else {
+    textEl.textContent = '📝 メモを追加';
+    textEl.classList.add('empty');
+  }
+}
+
+document.getElementById('memoEditBtn').addEventListener('click', openMemoModal);
+document.getElementById('memoText').addEventListener('click', openMemoModal);
+
+function openMemoModal() {
+  const key = `${calYear}-${calMonth}-${selectedDay}`;
+  const w = new Date(calYear, calMonth-1, selectedDay).getDay();
+  document.getElementById('memoModalDate').textContent = `${calYear}年${calMonth}月${selectedDay}日（${DW[w]}）`;
+  document.getElementById('memoInput').value = memoData[key] || '';
+  document.getElementById('memoModal').classList.add('open');
+  setTimeout(() => document.getElementById('memoInput').focus(), 350);
+}
+document.getElementById('memoCancelBtn').addEventListener('click', () => {
+  document.getElementById('memoModal').classList.remove('open');
+});
+document.getElementById('memoModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('memoModal'))
+    document.getElementById('memoModal').classList.remove('open');
+});
+document.getElementById('memoSaveBtn').addEventListener('click', () => {
+  const key = `${calYear}-${calMonth}-${selectedDay}`;
+  const val = document.getElementById('memoInput').value.trim();
+  if (val) memoData[key] = val;
+  else delete memoData[key];
+  saveMemos();
+  document.getElementById('memoModal').classList.remove('open');
+  renderMemo();
+  buildCalendar(); // メモドット更新
 });
 
 // ==================== INIT ====================
