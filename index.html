@@ -634,12 +634,23 @@ function updatePlant() {
 function todayKey() {
   return `${today.getFullYear()}-${today.getMonth()+1}-${today.getDate()}`;
 }
-function calcInterval(times) {
-  if (!times || times.length < 2) return '−−:−−';
-  const a = times[times.length-2], b = times[times.length-1];
-  const [ah,am] = a.split(':').map(Number);
-  const [bh,bm] = b.split(':').map(Number);
-  const diff = (bh*60+bm) - (ah*60+am);
+function calcInterval(times, prevLast) {
+  // 1本しかない場合、前日の最後からのインターバルを返す
+  if (!times || times.length === 0) return '−−:−−';
+  const last = times[times.length - 1];
+  let from;
+  let crossMidnight = false;
+  if (times.length >= 2) {
+    from = times[times.length - 2];
+  } else if (prevLast) {
+    from = prevLast;
+    crossMidnight = true;
+  } else {
+    return '−−:−−';
+  }
+  const [fh,fm] = from.split(':').map(Number);
+  const [th,tm] = last.split(':').map(Number);
+  const diff = (crossMidnight ? th*60+tm+24*60 : th*60+tm) - (fh*60+fm);
   if (diff <= 0) return '−−:−−';
   return `${Math.floor(diff/60).toString().padStart(2,'0')}:${(diff%60).toString().padStart(2,'0')}`;
 }
@@ -654,7 +665,11 @@ function refreshHome() {
   const recs = smokeData[key] || [];
   const n = recs.length;
   document.getElementById('countBig').textContent = n;
-  document.getElementById('intervalTime').textContent = calcInterval(recs);
+  const prevD = new Date(today); prevD.setDate(prevD.getDate()-1);
+  const prevK = `${prevD.getFullYear()}-${prevD.getMonth()+1}-${prevD.getDate()}`;
+  const prevRecs = smokeData[prevK] || [];
+  const prevLast = prevRecs.length > 0 ? prevRecs[prevRecs.length-1] : null;
+  document.getElementById('intervalTime').textContent = calcInterval(recs, prevLast);
   updateWeather(n);
   updatePlant();
 }
@@ -749,15 +764,35 @@ function renderTimeList() {
     return;
   }
 
+  // 前日の最後の記録を取得
+  const prevDate = new Date(calYear, calMonth-1, selectedDay - 1);
+  const prevKey = `${prevDate.getFullYear()}-${prevDate.getMonth()+1}-${prevDate.getDate()}`;
+  const prevTimes = smokeData[prevKey] || [];
+  const prevLast = prevTimes.length > 0 ? prevTimes[prevTimes.length - 1] : null;
+
+  function minuteDiff(fromTime, toTime, crossMidnight) {
+    const [fh,fm] = fromTime.split(':').map(Number);
+    const [th,tm] = toTime.split(':').map(Number);
+    const from = fh*60+fm;
+    const to = crossMidnight ? th*60+tm + 24*60 : th*60+tm;
+    return to - from;
+  }
+  function fmtInterval(mins) {
+    if (mins <= 0) return '−−:−−';
+    const h = Math.floor(mins/60).toString().padStart(2,'0');
+    const m = (mins%60).toString().padStart(2,'0');
+    return `${h}:${m}`;
+  }
+
   times.forEach((t, i) => {
     let interval = '−−:−−';
-    if (i > 0) {
-      const [ph,pm] = times[i-1].split(':').map(Number);
-      const [ch,cm] = t.split(':').map(Number);
-      const diff = (ch*60+cm) - (ph*60+pm);
-      if (diff > 0) {
-        interval = `${Math.floor(diff/60).toString().padStart(2,'0')}:${(diff%60).toString().padStart(2,'0')}`;
+    if (i === 0) {
+      // 1本目：前日の最後からのインターバル
+      if (prevLast) {
+        interval = fmtInterval(minuteDiff(prevLast, t, true));
       }
+    } else {
+      interval = fmtInterval(minuteDiff(times[i-1], t, false));
     }
 
     const wrap = document.createElement('div');
